@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>打砖块</title>
+    <style>
+        * {
+            padding: 0;
+            margin: 0;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+        }
+
+        #score-history {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #fff;
+        }
+
+        #score-history table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #score-history table, #score-history th, #score-history td {
+            border: 1px solid #fff;
+        }
+
+        #score-history th, #score-history td {
+            padding: 10px;
+            text-align: center;
+        }
+    </style>
+    <script src="phaser.min.js"></script>
+</head>
+<body>
+    <script>
+        // 游戏配置
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            }
+        };
+
+        const game = new Phaser.Game(config);
+
+        let paddle;
+        let ball;
+        let bricks;
+        let score = 0;
+        let lives = 3;
+        let winText;
+        let scoreText;
+        let livesText;
+        let gameOverText;
+
+        function preload() {
+            // 加载图片资源
+            this.load.image('paddle', 'paddle.png');  // 确保文件存在
+            this.load.image('ball', 'ball.png');  // 确保文件存在
+            this.load.image('brick', 'brick.png');  // 确保文件存在
+        }
+
+        function create() {
+            // 初始化物理系统
+            this.physics.world.setBoundsCollision(true, true, true, false);
+
+            // 建造砖块场地
+            bricks = this.physics.add.staticGroup();
+            const brickWidth = 80;
+            const brickHeight = 30;
+            const offset = 50;
+            for (let y = offset; y < 300; y += brickHeight + 10) {
+                for (let x = offset; x < 700; x += brickWidth + 10) {
+                    const brick = bricks.create(x, y, 'brick');
+                    brick.setImmovable(true);
+                }
+            }
+
+            // 创建球
+            ball = this.physics.add.image(400, 500, 'ball');
+            ball.setBounce(1);
+            ball.setCollideWorldBounds(true);
+            ball.setVelocity(Phaser.Math.Between(-200, 200), -200);
+
+            // 创建挡板
+            paddle = this.physics.add.image(400, 550, 'paddle');
+            paddle.setImmovable(true);
+
+            // 创建文本显示
+            scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '32px', fill: '#fff' });
+            livesText = this.add.text(700, 16, 'Lives: 3', { fontSize: '32px', fill: '#fff' });
+
+            // 碰撞检测
+            this.physics.add.collider(ball, bricks, hitBrick, null, this);
+            this.physics.add.collider(ball, paddle);
+
+            // 初始化结束文本
+            gameOverText = null;
+            winText = null;
+        }
+
+        function update() {
+            // 控制挡板跟随鼠标移动
+            paddle.x = this.input.x;
+            if (paddle.x < paddle.width / 2) {
+                paddle.x = paddle.width / 2;
+            } else if (paddle.x > config.width - paddle.width / 2) {
+                paddle.x = config.width - paddle.width / 2;
+            }
+
+            // 球超出底部边界，失去一条生命
+            if (ball.y > config.height) {
+                lives--;
+                livesText.setText('Lives: ' + lives);
+                if (lives === 0) {
+                    gameOver();
+                } else {
+                    resetBall();
+                }
+            }
+
+            // 检查是否所有砖块都被摧毁（赢得比赛）
+            if (bricks.countActive() === 0) {
+                winGame();
+            }
+        }
+
+        function hitBrick(ball, brick) {
+            brick.disableBody(true, true);
+            score += 10;
+            scoreText.setText('Score: ' + score);
+        }
+
+        function submitScore(score) {
+            // 向后端发送 POST 请求，提交得分
+            fetch('http://localhost:5000/api/score', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: 'Player',  // 玩家名字可以动态设置
+                    score: score
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Score submitted:', data);
+            })
+            .catch(error => {
+                console.error('Error submitting score:', error);
+            });
+        }
+
+        function gameOver() {
+            // 显示游戏结束文本
+            if (!gameOverText) {
+                gameOverText = this.add.text(config.width / 2, config.height / 2, 'Game Over', {
+                    fontSize: '64px',
+                    fill: '#ff0000'
+                });
+                gameOverText.setOrigin(0.5);
+            }
+            ball.setVelocity(0, 0);
+            submitScore(score); // 提交得分
+        }
+
+        function winGame() {
+            // 显示赢得游戏文本
+            if (!winText) {
+                winText = this.add.text(config.width / 2, config.height / 2, 'You Win!', {
+                    fontSize: '64px',
+                    fill: '#00ff00'
+                });
+                winText.setOrigin(0.5);
+            }
+            ball.setVelocity(0, 0);
+            submitScore(score); // 提交得分
+        }
+
+        function resetBall() {
+            ball.setPosition(config.width / 2, config.height / 2);
+            ball.setVelocity(Phaser.Math.Between(-200, 200), -200);
+        }
+
+        // 页面加载时展示得分历史
+        window.onload = function () {
+            fetch('http://localhost:5000/api/scores')
+                .then(response => response.json())
+                .then(data => {
+                    const historyDiv = document.getElementById('score-history');
+                    const table = document.createElement('table');
+                    table.innerHTML = `
+                        <tr>
+                            <th>Rank</th>
+                            <th>Name</th>
+                            <th>Score</th>
+                        </tr>
+                    `;
+                    data.forEach((score, index) => {
+                        const row = table.insertRow();
+                        row.innerHTML = `
+                            <td>${index + 1}</td>
+                            <td>${score.name}</td>
+                            <td>${score.score}</td>
+                        `;
+                    });
+                    historyDiv.appendChild(table);
+                })
+                .catch(error => {
+                    console.error('Error fetching score history:', error);
+                });
+        };
+    </script>
+
+    <div id="score-history"></div>
+</body>
+</html>
